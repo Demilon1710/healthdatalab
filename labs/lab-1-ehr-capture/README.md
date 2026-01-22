@@ -449,57 +449,126 @@ git commit -m "Checkpoint 2: sample clinical data inserted"
 
 Abre `connection_test.ipynb`.
 
-### 4.1 Ver pacientes y admisiones
+> [!IMPORTANT]
+> Ejecuta **una consulta a la vez**. Si una falla, no sigas.
+
+### 4.1 “Patient Journey” mínimo: quién es el paciente y cuándo entró/salió
 
 ```python
 pd.read_sql("""
-SELECT p.subject_id, a.hadm_id, a.admission_type, a.admittime, a.dischtime
+SELECT
+  p.subject_id,
+  p.external_id,
+  p.full_name,
+  a.hadm_id,
+  a.admission_type,
+  a.admittime,
+  a.dischtime,
+  a.hospital_expire_flag
 FROM patients p
-JOIN admissions a ON p.subject_id = a.subject_id
-ORDER BY p.subject_id;
+JOIN admissions a ON a.subject_id = p.subject_id
+ORDER BY a.admittime;
 """, engine)
 ```
+
+Esto ya te muestra el **eje real**: paciente → admisiones.
 
 ---
 
 ## 🔵 CHECKPOINT 4 — Consulta funcionando
 
 > [!IMPORTANT]
-> Si ves una tabla, **cerraste el ciclo DB → análisis**.
+> Si ves una tabla con `subject_id`, `hadm_id` y fechas, **cerraste el ciclo DB → análisis**.
 
 ---
 
 ## 5) Consultas guiadas (escritas por ti)
 
-### 5.1 ¿Cuántas admisiones tiene cada paciente?
+> [!NOTE]
+> Aquí ya no copies SQL completo. Escribe tú el query dentro del notebook.
 
-Pistas:
+### 5.1 ¿Qué pacientes han tenido **más de una admisión**?
+
+**Pregunta clínica:** “¿Quiénes son los pacientes ‘frecuent flyers’?”
+
+**Pistas:**
 
 - `COUNT(*)`
-- `GROUP BY subject_id`
+- `GROUP BY p.subject_id, p.external_id, p.full_name`
+- `HAVING COUNT(*) > 1`
 
-### 5.2 ¿Duración de estancia por admisión?
+**Tu salida debe incluir:**
 
-Pistas:
-
-- `dischtime - admittime`
-- alias como `length_of_stay`
-
-### 5.3 Máximo valor de creatinina por admisión
-
-Pistas:
-
-- JOIN `labevents` + `d_labitems`
-- filtra `Creatinine`
-- usa `MAX(value_num)`
+- `external_id`, `full_name`, `n_admissions`
 
 ---
 
+### 5.2 ¿Cuál fue la **duración de estancia** por admisión (en días)?
+
+**Pregunta clínica:** “¿Cuánto tiempo estuvo internado cada encuentro?”
+
+**Pistas (Postgres):**
+
+- `EXTRACT(EPOCH FROM (dischtime - admittime)) / 86400.0`
+- alias: `length_of_stay_days`
+- ordena de mayor a menor
+
+**Tu salida debe incluir:**
+
+- `hadm_id`, `external_id`, `full_name`, `length_of_stay_days`
+
+---
+
+### 5.3 “Eventos” de laboratorio: **peak creatinine** por admisión
+
+**Pregunta clínica:** “¿En qué admisiones hubo peor función renal?”
+
+**Pistas:**
+
+- JOIN `labevents` + `d_labitems`
+- filtra `d_labitems.label = 'Creatinine'`
+- `MAX(value_num)` por `hadm_id`
+- une a `admissions` y `patients` para dar contexto
+
+**Tu salida debe incluir:**
+
+- `hadm_id`, `external_id`, `full_name`, `max_creatinine`
+
+---
+
+### 5.4 Sepsis proxy: **WBC alto o lactato alto** por admisión
+
+**Pregunta clínica:** “¿Qué admisiones parecen más severas?”
+
+**Definición simple para el lab (no clínica real):**
+
+- WBC > 12 **o** Lactate > 2
+
+**Pistas:**
+
+- filtra `label IN ('White Blood Cells','Lactate')`
+- usa `MAX(CASE WHEN ... THEN value_num END)` para pivotear por admisión
+- luego filtra por umbrales
+
+**Tu salida debe incluir:**
+
+- `hadm_id`, `external_id`, `full_name`, `max_wbc`, `max_lactate`
+
+---
+
+👉 Commit final (entrega):
+
+```powershell
+git add *.ipynb
+git commit -m "Checkpoint 3: clinical queries running in Jupyter"
+```
+
 ## 6) Reflexión (responde en el PR)
 
-1. ¿Por qué los laboratorios no están en `patients`?
-2. ¿Qué representa `hadm_id` clínicamente?
-3. ¿Qué problema tendría una sola tabla?
+1. ¿Por qué `labevents` cuelga de `hadm_id` y no de `subject_id`?
+2. ¿Qué representa `hadm_id` clínicamente (en una frase)?
+3. ¿Por qué existe `d_labitems`? ¿Qué problema resuelve?
+4. Si tuvieras una sola tabla gigante, ¿qué se volvería difícil: **actualizar** o **consultar**? Explica con un ejemplo.
 
 ---
 
